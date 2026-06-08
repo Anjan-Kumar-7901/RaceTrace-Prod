@@ -1,0 +1,95 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "ui-sans-serif", "system-ui", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "Roboto", "Helvetica Neue", "Arial", "sans-serif";
+  --font-display: "ui-sans-serif", "system-ui", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "Roboto", "Helvetica Neue", "Arial", "sans-serif";
+  --font-mono: "ui-monospace", "SFMono-Regular", "SF Pro Mono", "Consolas", "Liberation Mono", "Menlo", "monospace";
+}
+
+/* Custom design system styling based on your color palette */
+:root {
+  --carbon: #09090B;
+  --carbon-2: #111114;
+  --carbon-3: #151519;
+
+  --paper: #18181B;
+  --paper-2: #1F1F23;
+  --paper-3: #26262B;
+
+  --ink: #FAFAFA;
+  --ink-2: #D4D4D8;
+  --ink-3: #A1A1AA;
+
+  --racing: #F59E0B;
+  --racing-hot: #FBBF24;
+  --racing-soft: #FCD34D;
+
+  --rule-light: rgba(255, 255, 255, 0.08);
+}
+
+body {
+  background-color: var(--carbon);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+/* Classic card design - simple, clear lines */
+.f1-card {
+  background-color: var(--paper);
+  border: 1px solid var(--rule-light);
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.f1-card-highlighted {
+  background-color: var(--paper);
+  border: 1px solid var(--racing);
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(245, 158, 11, 0.15);
+}
+
+/* Clean progress bars */
+.racing-bar {
+  background-color: var(--racing);
+  height: 4px;
+  border-radius: 2px;
+}
+
+/* Simple infinite marquee ticker */
+@keyframes ticker-scroll {
+  0% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.ticker-scroll-content {
+  display: flex;
+  width: max-content;
+  animation: ticker-scroll 35s linear infinite;
+}
+
+.ticker-scroll-content:hover {
+  animation-play-state: paused;
+}
+
+/* Custom simple scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--carbon);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--paper-3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--racing);
+}

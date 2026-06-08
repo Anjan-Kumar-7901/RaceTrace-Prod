@@ -1,0 +1,6 @@
+{
+  "name": "RaceTrace",
+  "description": "Futuristic Formula 1 companion dashboard with live telemetry, standings, countdowns, and personalized driver tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
