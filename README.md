@@ -235,7 +235,7 @@ The production server serves the built frontend and the RaceTrace API routes fro
 
 ## Deploying to Vercel
 
-The repository includes `vercel.json` and a serverless Express adapter at `api/index.ts`.
+The repository includes `vercel.json` and a native Vercel catch-all Express function at `api/[...path].ts`.
 
 1. Import the repository into Vercel.
 2. Keep the detected framework preset as Vite.
