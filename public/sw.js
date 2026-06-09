@@ -1,4 +1,4 @@
-const CACHE_NAME = "racetrace-cache-v4";
+const CACHE_NAME = "racetrace-cache-v5";
 const ASSETS_TO_CACHE = [
   "/",
   "/index.html",
@@ -45,6 +45,12 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(event.request.url);
 
+  // API requests must always reach the serverless API and must never resolve to the SPA shell.
+  if (url.pathname.startsWith("/api/")) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+
   // Skip dev dependencies, hot module reloading socket feeds, etc.
   if (url.pathname.includes("@vite") || url.pathname.includes("hot-update") || url.pathname.includes("node_modules") || url.pathname.startsWith("/src/")) {
     return;
@@ -54,7 +60,7 @@ self.addEventListener("fetch", (event) => {
     fetch(event.request)
       .then((networkResponse) => {
         // If response valid, save copy to cache for static assets
-        if (networkResponse && networkResponse.status === 200 && url.origin === self.location.origin && !url.pathname.startsWith("/api/")) {
+        if (networkResponse && networkResponse.status === 200 && url.origin === self.location.origin) {
           const responseToCache = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
             cache.put(event.request, responseToCache);
@@ -71,12 +77,6 @@ self.addEventListener("fetch", (event) => {
             return caches.match("/");
           }
 
-          if (url.pathname.startsWith("/api/")) {
-            // Elegant empty json fallback when disconnected
-            return new Response(JSON.stringify({ offline: true }), {
-              headers: { "Content-Type": "application/json" }
-            });
-          }
         });
       })
   );

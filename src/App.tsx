@@ -32,6 +32,10 @@ async function fetchJsonWithTimeout<T>(url: string, options: RequestInit = {}): 
   try {
     const response = await fetch(url, { ...options, signal: controller.signal });
     if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+      throw new Error(`Expected JSON from ${url}, received ${contentType || "an unknown content type"}`);
+    }
     return await response.json() as T;
   } finally {
     window.clearTimeout(timeout);
