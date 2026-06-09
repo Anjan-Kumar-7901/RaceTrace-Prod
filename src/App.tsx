@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { 
   Settings2, 
-  Activity, 
   RefreshCw, 
-  Globe2 
+  Globe2,
+  Moon,
+  Sun
 } from "lucide-react";
 
 import WelcomeScreen from "./components/WelcomeScreen";
@@ -16,11 +17,37 @@ import ChampionshipStandings from "./components/ChampionshipStandings";
 import NewsSection from "./components/NewsSection";
 import LapTimingVisualizer from "./components/LapTimingVisualizer";
 
-import { Driver, Constructor, Race, Article, AppState } from "./types";
+import { Driver, Constructor, Race, Article, AppState, DriverCareerStats } from "./types";
 
 const LOCAL_STORAGE_KEY = "racetrace_session_state";
+const THEME_STORAGE_KEY = "racetrace_theme";
+const API_TIMEOUT_MS = 15_000;
+
+async function fetchJsonWithTimeout<T>(url: string, options: RequestInit = {}): Promise<T> {
+  const controller = new AbortController();
+  const parentSignal = options.signal;
+  const abortFromParent = () => controller.abort();
+  parentSignal?.addEventListener("abort", abortFromParent, { once: true });
+  const timeout = window.setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+    return await response.json() as T;
+  } finally {
+    window.clearTimeout(timeout);
+    parentSignal?.removeEventListener("abort", abortFromParent);
+  }
+}
 
 export default function App() {
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    try {
+      return localStorage.getItem(THEME_STORAGE_KEY) === "light" ? "light" : "dark";
+    } catch {
+      return "dark";
+    }
+  });
+
   // Master Onboarding State loaded lazily from localStorage
   const [appState, setAppState] = useState<AppState>(() => {
     try {
@@ -49,6 +76,8 @@ export default function App() {
   const [constructors, setConstructors] = useState<Constructor[]>([]);
   const [races, setRaces] = useState<Race[]>([]);
   const [news, setNews] = useState<Article[]>([]);
+  const [favoriteCareerStats, setFavoriteCareerStats] = useState<DriverCareerStats | null>(null);
+  const [careerLoading, setCareerLoading] = useState(false);
 
   // Loading and error states
   const [loading, setLoading] = useState(false);
@@ -61,146 +90,54 @@ export default function App() {
   const syncApplicationData = async () => {
     setLoading(true);
     setErrorSync(false);
-    try {
-      // 1. Fetch standings from Ergast Developer API
-      let parsedDrivers: Driver[] = [];
-      let parsedConstructors: Constructor[] = [];
-      let standingsDone = false;
-
+    const fetchJson = async (url: string, label: string) => {
       try {
-        console.log("Fetching live F1 standings directly from Ergast API...");
-        const response = await fetch("https://api.jolpica.com/ergast/f1/current/driverStandings.json");
-        const data = await response.json();
-        const standingsList = data?.MRData?.StandingsTable?.StandingsList?.[0]?.DriverStandings || [];
-
-        if (standingsList.length > 0) {
-          parsedDrivers = standingsList.map((item: any, idx: number) => {
-            const d = item.Driver;
-            const t = item.Constructors?.[0];
-            const driverId = d.driverId;
-            return {
-              id: driverId,
-              name: `${d.givenName} ${d.familyName}`,
-              number: parseInt(d.permanentNumber) || (idx + 1),
-              team: t?.name || "Independent",
-              points: parseFloat(item.points) || 0,
-              wins: parseInt(item.wins) || 0,
-              podiums: parseInt(item.wins) > 1 
-                ? parseInt(item.wins) + 2 
-                : (driverId.includes("verstappen") ? 6 : (driverId.includes("norris") ? 5 : 1)),
-              position: parseInt(item.position) || (idx + 1),
-              form: driverId.includes("verstappen") 
-                ? ["P1", "P2", "P1", "P1", "P3"] 
-                : (driverId.includes("norris") ? ["P2", "P1", "P2", "P3", "P1"] : ["P8", "P6", "P10", "P11", "P9"]),
-              photoUrl: "https://images.unsplash.com/photo-1552519507-da3b142c6e3d?auto=format&fit=crop&q=80&w=200"
-            };
-          });
-
-          // Fetch constructor standings directly
-          try {
-            const cResponse = await fetch("https://api.jolpica.com/ergast/f1/current/constructorStandings.json");
-            const cData = await cResponse.json();
-            const constList = cData?.MRData?.StandingsTable?.StandingsList?.[0]?.ConstructorStandings || [];
-            parsedConstructors = constList.map((item: any, idx: number) => {
-              const c = item.Constructor;
-              return {
-                id: c.constructorId,
-                name: c.name,
-                points: parseFloat(item.points) || 0,
-                position: parseInt(item.position) || (idx + 1)
-              };
-            });
-          } catch (cErr) {
-            console.warn("Direct constructor standings fetch failed, using fallback mapper", cErr);
-          }
-
-          standingsDone = true;
-        }
-      } catch (err) {
-        console.warn("Direct Ergast driver standings call failed or CORS-blocked. Trying secure server proxy.", err);
+        return await fetchJsonWithTimeout<any>(url);
+      } catch (error: any) {
+        throw new Error(`${label} request failed: ${error?.message || error}`);
       }
+    };
 
-      if (!standingsDone) {
-        const standingsRes = await fetch("/api/f1/standings");
-        const standingsData = await standingsRes.json();
-        if (standingsData.drivers) parsedDrivers = standingsData.drivers;
-        if (standingsData.constructors) parsedConstructors = standingsData.constructors;
-      }
+    // Server endpoints isolate the browser from upstream CORS and schema changes.
+    const results = await Promise.allSettled([
+      fetchJson("/api/f1/standings", "Standings"),
+      fetchJson("/api/f1/calendar", "Calendar"),
+      fetchJson("/api/f1/news", "News"),
+    ]);
 
-      if (parsedDrivers.length > 0) setDrivers(parsedDrivers);
-      if (parsedConstructors.length > 0) setConstructors(parsedConstructors);
-
-
-      // 2. Fetch full season calendar & next race from Ergast Developer API
-      let parsedRaces: Race[] = [];
-      let calendarDone = false;
-
-      try {
-        console.log("Fetching live next race prediction from Ergast next.json...");
-        const nextResponse = await fetch("https://api.jolpica.com/ergast/f1/current/next.json");
-        const nextData = await nextResponse.json();
-        const nextRaceRaw = nextData?.MRData?.RaceTable?.Races?.[0];
-
-        // Fetch full calendar to populate everything
-        const calResponse = await fetch("https://api.jolpica.com/ergast/f1/current.json");
-        const calData = await calResponse.json();
-        const rawRaces = calData?.MRData?.RaceTable?.Races || [];
-
-        if (rawRaces.length > 0) {
-          parsedRaces = rawRaces.map((item: any, idx: number) => {
-            const raceDate = new Date(`${item.date}T${item.time || "12:00:00Z"}`);
-            const isPast = raceDate.getTime() < Date.now();
-            let status: "completed" | "upcoming" = isPast ? "completed" : "upcoming";
-
-            if (nextRaceRaw && parseInt(item.round) === parseInt(nextRaceRaw.round)) {
-              status = "upcoming";
-            }
-
-            return {
-              round: parseInt(item.round) || (idx + 1),
-              name: item.raceName || "Grand Prix",
-              circuit: item.Circuit?.circuitName || "Racing Circuit",
-              country: item.Circuit?.Location?.country || "Worldwide",
-              date: item.date || "2026-06-08",
-              time: item.time || "12:00:00Z",
-              status
-            };
-          });
-          calendarDone = true;
-        }
-      } catch (err) {
-        console.warn("Direct Ergast calendar calls failed or CORS-blocked. Trying secure server proxy.", err);
-      }
-
-      if (!calendarDone) {
-        const calendarRes = await fetch("/api/f1/calendar");
-        const calendarData = await calendarRes.json();
-        if (Array.isArray(calendarData)) parsedRaces = calendarData;
-      }
-
-      if (parsedRaces.length > 0) setRaces(parsedRaces);
-
-
-      // 3. Fetch Curated live news
-      const newsRes = await fetch("/api/f1/news");
-      const newsData = await newsRes.json();
-      if (Array.isArray(newsData)) setNews(newsData);
-
-    } catch (err) {
-      console.error("Data synchronization error:", err);
-      setErrorSync(true);
-    } finally {
-      setLoading(false);
+    const [standingsResult, calendarResult, newsResult] = results;
+    if (standingsResult.status === "fulfilled") {
+      if (Array.isArray(standingsResult.value.drivers)) setDrivers(standingsResult.value.drivers);
+      if (Array.isArray(standingsResult.value.constructors)) setConstructors(standingsResult.value.constructors);
     }
+    if (calendarResult.status === "fulfilled" && Array.isArray(calendarResult.value)) {
+      setRaces(calendarResult.value);
+    }
+    if (newsResult.status === "fulfilled" && Array.isArray(newsResult.value)) {
+      setNews(newsResult.value);
+    }
+
+    const failures = results.filter((result) => result.status === "rejected");
+    failures.forEach((failure) => console.error("Data synchronization error:", failure.reason));
+    setErrorSync(failures.length > 0);
+    setLoading(false);
   };
 
   // Synchronize on mount and set up regular 10-minute refresh
   useEffect(() => {
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker
-        .register("/sw.js")
-        .then((reg) => console.log("Service Worker registered on", reg.scope))
-        .catch((err) => console.warn("Service Worker failed", err));
+      const isLocalDev = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+      if (isLocalDev) {
+        navigator.serviceWorker
+        .getRegistrations()
+          .then((registrations) => registrations.forEach((registration) => registration.unregister()))
+          .catch((err) => console.warn("Service Worker cleanup failed", err));
+      } else {
+        navigator.serviceWorker
+          .register("/sw.js")
+          .then((reg) => console.log("Service Worker registered on", reg.scope))
+          .catch((err) => console.warn("Service Worker failed", err));
+      }
     }
 
     const captureInstaller = (e: Event) => {
@@ -232,6 +169,18 @@ export default function App() {
     }
   }, [appState]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, theme);
+    } catch {}
+    document.documentElement.style.colorScheme = theme;
+    document.body.classList.toggle("light-theme-body", theme === "light");
+    document.querySelector('meta[name="theme-color"]')?.setAttribute(
+      "content",
+      theme === "light" ? "#F4F4F5" : "#080808"
+    );
+  }, [theme]);
+
   // Installer prompt helper
   const triggerPWAInstall = async () => {
     if (!installPrompt) return;
@@ -251,16 +200,64 @@ export default function App() {
     setPersonalizationStep("name");
   };
 
-  // Find favorite driver object with robust matching (by exact ID, substring, or surname)
+  // Find favorite driver object by stable id, normalized id, or surname.
   const favoriteDriver = drivers.find((d) => {
     const aid = appState.favoriteDriverId.toLowerCase();
     const bid = d.id.toLowerCase();
     if (aid === bid) return true;
-    if (aid.includes(bid) || bid.includes(aid)) return true;
+    if (aid.replace(/[^a-z0-9]/g, "") === bid.replace(/[^a-z0-9]/g, "")) return true;
     const aLast = d.name.split(" ").pop()?.toLowerCase();
     if (aLast && aid.includes(aLast)) return true;
     return false;
   });
+
+  useEffect(() => {
+    if (!favoriteDriver?.id) {
+      setFavoriteCareerStats(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    setCareerLoading(true);
+    setFavoriteCareerStats(null);
+
+    const loadCareerStats = async (attempt = 0) => {
+      try {
+        const payload = await fetchJsonWithTimeout<DriverCareerStats>(`/api/f1/drivers/${encodeURIComponent(favoriteDriver.id)}/career`, {
+          signal: controller.signal,
+          cache: "no-store",
+        });
+        if (
+          !Number.isFinite(payload.currentPoints) ||
+          !Number.isFinite(payload.currentWins) ||
+          !Number.isFinite(payload.currentPodiums) ||
+          !Number.isFinite(payload.careerWins) ||
+          !Number.isFinite(payload.careerPodiums) ||
+          !Number.isFinite(payload.championships) ||
+          payload.source !== "Jolpica F1 API"
+        ) {
+          throw new Error("Career statistics response is incomplete");
+        }
+        setFavoriteCareerStats(payload);
+        setCareerLoading(false);
+      } catch (error: any) {
+        if (error.name === "AbortError") return;
+        if (attempt < 2) {
+          retryTimer = setTimeout(() => loadCareerStats(attempt + 1), 1500 * (attempt + 1));
+          return;
+        }
+        console.error("Favorite driver career statistics error:", error);
+        setCareerLoading(false);
+      }
+    };
+
+    loadCareerStats();
+    return () => {
+      controller.abort();
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [favoriteDriver?.id]);
 
   // Onboarding screens
   if (!appState.onboarded) {
@@ -277,6 +274,7 @@ export default function App() {
       return (
         <DriverSelection
           userName={appState.userName}
+          drivers={drivers}
           onSelect={(driverId) => {
             setAppState((prev) => ({
               ...prev,
@@ -290,23 +288,23 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#09090B] flex flex-col font-sans text-white pb-6 transition-colors relative">
+    <div className={`${theme === "light" ? "light-theme" : ""} min-h-screen bg-[#080808] flex flex-col font-sans text-white pb-6 transition-colors relative`}>
       
-      {/* 1. Standings Ticker */}
+     {/* 1. Standings Ticker */}
       {drivers.length > 0 && <TopTicker standings={drivers} />}
 
       {/* 2. Top Navigation header */}
-      <header className="z-20 bg-[#111114] border-b border-white/8 sticky top-0" id="main-header">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <header className="z-20 bg-[#101010] border-b border-white/8 sticky top-0" id="main-header">
+        <div className="max-w-[1440px] mx-auto px-6 lg:px-9 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-[#F59E0B] rounded-lg flex items-center justify-center">
-              <Activity className="w-5 h-5 text-black" />
+            <div className="w-10 h-10 rounded-lg overflow-hidden border border-white/12 bg-black flex items-center justify-center shadow-[0_0_14px_rgba(239,255,0,0.12)]">
+              <img src="/racetrace-icon.png" alt="" className="w-full h-full object-cover" />
             </div>
             <div>
-              <h1 className="font-sans font-black tracking-wider text-white text-base sm:text-lg uppercase">
-                F1 COMPANION <span className="font-light text-[#FBBF24]">'26</span>
+              <h1 className="font-display font-black tracking-wider text-white text-base sm:text-lg uppercase">
+                RACE TRACE <span className="font-light text-[#F8FAFC]">'26</span>
               </h1>
-              <p className="font-sans text-[9px] text-[#A1A1AA] uppercase tracking-wider">
+              <p className="font-sans text-[9px] text-[#9CA3AF] uppercase tracking-wider">
                 Keep up with the 2026 season
               </p>
             </div>
@@ -318,7 +316,7 @@ export default function App() {
               <button
                 id="pwa-install-nav-button"
                 onClick={triggerPWAInstall}
-                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#F59E0B]/10 border border-[#F59E0B]/20 rounded-md text-xs font-sans font-bold text-[#FBBF24] hover:bg-[#F59E0B]/25 cursor-pointer"
+                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#D1D5DB]/10 border border-[#D1D5DB]/20 rounded-md text-xs font-sans font-bold text-[#F8FAFC] hover:bg-[#D1D5DB]/25 cursor-pointer"
               >
                 <Globe2 className="w-3.5 h-3.5" />
                 Install App
@@ -330,56 +328,69 @@ export default function App() {
               id="manual-refresh-button"
               disabled={loading}
               onClick={syncApplicationData}
-              className="p-2 bg-[#18181B] border border-white/8 hover:border-[#F59E0B]/55 rounded-lg text-[#A1A1AA] hover:text-white transition-all cursor-pointer disabled:opacity-50"
+              className="p-2 bg-[#151515] border border-white/8 hover:border-[#D1D5DB]/55 rounded-lg text-[#9CA3AF] hover:text-white transition-all cursor-pointer disabled:opacity-50"
               title="Refresh F1 standby data"
             >
-              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin text-[#F59E0B]" : ""}`} />
+              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin text-[#D1D5DB]" : ""}`} />
             </button>
 
             {/* Reset Button */}
             <button
               id="reset-onboarding-button"
               onClick={handleResetPersonalization}
-              className="px-3 py-1.5 bg-[#18181B] border border-white/8 hover:border-[#F59E0B]/30 rounded-lg text-xs font-sans text-[#A1A1AA] hover:text-white flex items-center gap-1.5 cursor-pointer"
+              className="px-3 py-1.5 bg-[#151515] border border-white/8 hover:border-[#D1D5DB]/30 rounded-lg text-xs font-sans text-[#9CA3AF] hover:text-white flex items-center gap-1.5 cursor-pointer"
               title="Change favorite driver"
             >
-              <Settings2 className="w-3.5 h-3.5 text-[#F59E0B]" />
+              <Settings2 className="w-3.5 h-3.5 text-[#D1D5DB]" />
               <span className="hidden sm:inline">Change Driver</span>
+            </button>
+
+            <button
+              id="theme-toggle-button"
+              type="button"
+              onClick={() => setTheme((current) => current === "dark" ? "light" : "dark")}
+              className="p-2 bg-[#151515] border border-white/8 hover:border-[#D1D5DB]/55 rounded-lg text-[#9CA3AF] hover:text-white transition-all cursor-pointer"
+              title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+              aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+            >
+              {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
           </div>
         </div>
       </header>
 
       {/* 3. Main Dashboard grid layout */}
-      <main className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 mt-6 flex-1 space-y-6 select-none" id="dashboard-wrapper">
+      <main className="max-w-[1440px] w-full mx-auto px-6 lg:px-9 mt-8 flex-1 space-y-8 select-none" id="dashboard-wrapper">
         
         {/* Simple Hero banner */}
         <section 
-          className="relative rounded-2xl p-6 sm:p-8 bg-[#18181B] border border-white/8 overflow-hidden shadow-2xl"
+          className="relative rounded-lg p-7 sm:p-10 bg-[#151515] border border-white/8 overflow-hidden"
           id="hero-dashboard-panel"
         >
-          <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="relative z-10 flex flex-col lg:flex-row lg:items-end justify-between gap-8">
             <div>
-              <span className="font-sans text-[10px] text-[#FBBF24] bg-[#F59E0B]/10 px-2.5 py-1 rounded border border-[#F59E0B]/20 uppercase tracking-wider font-bold">
-                F1 Companion Dashboard
+              <span className="font-mono text-[10px] text-[#F8FAFC] uppercase tracking-[0.24em] font-bold">
+                Race Control / 2026 Season
               </span>
-              <h2 className="font-sans text-2xl sm:text-3xl font-extrabold text-white mt-4">
-                Welcome, {appState.userName}
+              <h2 className="font-display text-5xl sm:text-7xl lg:text-8xl font-extrabold text-white mt-5 uppercase leading-[0.92] tracking-[0.06em]">
+                Welcome
+                <span className="hero-user-name block">{appState.userName}</span>
               </h2>
-              <p className="font-sans text-xs sm:text-sm text-[#D4D4D8] mt-1 max-w-xl leading-relaxed">
+              <div className="hero-underline" />
+              <p className="font-sans text-sm text-[#E5E7EB] mt-6 max-w-xl leading-relaxed">
                 Tracking the 2026 Formula 1 racing season. View live results, countdowns, race simulations, and standings.
               </p>
             </div>
 
             {/* System clock indicator */}
-            <div className="bg-[#111114] border border-white/8 px-4 py-3 rounded-xl min-w-[130px]" id="clock-telemetry-badge">
-              <span className="font-sans text-[9px] text-[#A1A1AA] uppercase tracking-wider">Current Time:</span>
-              <p className="font-sans font-black text-white text-base mt-1 tracking-wide">
+            <div className="bg-[#101010] border border-white/8 px-5 py-4 rounded-lg min-w-[180px]" id="clock-telemetry-badge">
+              <span className="font-mono text-[9px] text-[#9CA3AF] uppercase tracking-[0.2em]">Current Time</span>
+              <p className="font-mono font-black text-white text-xl mt-2 tracking-wide">
                 {new Date().getUTCHours()}:{String(new Date().getUTCMinutes()).padStart(2, "0")} UTC
               </p>
               <div className="flex items-center gap-1.5 mt-1.5">
                 <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                <span className="font-sans text-[9px] text-emerald-400 uppercase tracking-wider font-bold">Online</span>
+                <span className="font-mono text-[9px] text-emerald-400 uppercase tracking-wider font-bold">System Online</span>
               </div>
             </div>
           </div>
@@ -387,38 +398,42 @@ export default function App() {
 
         {/* Sync Warn banner */}
         {errorSync && (
-          <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl text-center text-xs font-sans text-white tracking-wide" id="error-alert">
+          <div className="p-4 bg-gray-300/10 border border-gray-300/30 rounded-xl text-center text-xs font-sans text-white tracking-wide" id="error-alert">
             ⚠️ F1 data feed is currently offline. Displaying saved results instead.
           </div>
         )}
 
-        {/* 4. Countdown */}
+               {/* 4. Countdown */}
         <NextRaceCountdown races={races} />
 
         {/* 5. Live timing simulation */}
         <LapTimingVisualizer favoriteDriverId={appState.favoriteDriverId} />
 
-        {/* 6. Favorite Driver Profile card + Vertical Race Calendar Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6" id="personalization-and-calendar-panels">
-          <div className="lg:col-span-6">
+        {/* 6. Full-width Favorite Driver Profile + Race Calendar */}
+        <div className="space-y-8" id="personalization-and-calendar-panels">
+          <section className="w-full">
             {favoriteDriver ? (
-              <FavoriteDriverCard driver={favoriteDriver} />
+              <FavoriteDriverCard
+                driver={favoriteDriver}
+                careerStats={favoriteCareerStats}
+                careerLoading={careerLoading}
+              />
             ) : (
-              <div className="p-6 rounded-2xl bg-[#18181B] text-center text-[#A1A1AA] font-sans text-xs min-h-[200px] flex flex-col items-center justify-center border border-white/8">
+              <div className="p-6 rounded-2xl bg-[#151515] text-center text-[#9CA3AF] font-sans text-xs min-h-[200px] flex flex-col items-center justify-center border border-white/8">
                 <p className="font-sans font-extrabold text-white uppercase mb-2">No Driver Tracked</p>
                 <p className="mb-4">Choose a favorite driver to view their metrics on your dashboard.</p>
                 <button
                   onClick={handleResetPersonalization}
-                  className="px-4 py-2 bg-[#F59E0B] text-black rounded-lg font-sans text-xs font-bold hover:bg-[#FBBF24]"
+                  className="px-4 py-2 bg-[#D1D5DB] text-black rounded-lg font-sans text-xs font-bold hover:bg-[#F8FAFC]"
                 >
                   Choose Driver
                 </button>
               </div>
             )}
-          </div>
-          <div className="lg:col-span-6">
+          </section>
+          <section className="w-full">
             {races.length > 0 && <RaceCalendar races={races} />}
-          </div>
+          </section>
         </div>
 
         {/* 7. Standings Deck (Driver + Constructor tables) */}
@@ -431,8 +446,12 @@ export default function App() {
       </main>
 
       {/* 9. Operational Status Footer */}
-      <footer className="mt-12 h-10 border-t border-white/8 bg-[#111114] flex items-center px-4 justify-between relative z-20 font-sans text-[10px] text-[#A1A1AA]" id="operational-footer">
-        <div className="flex items-center gap-4">
+      <footer className="mt-12 min-h-12 border-t border-white/8 bg-[#101010] flex items-center px-4 sm:px-6 py-2 justify-between gap-4 relative z-20 font-sans text-[10px] text-[#9CA3AF]" id="operational-footer">
+        <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+          <span className="footer-signature">
+            Made By <strong>Anjan</strong>
+          </span>
+          <span className="opacity-30">|</span>
           <span className="flex items-center gap-1.5 text-emerald-400">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> 
             Status: Online
@@ -440,7 +459,7 @@ export default function App() {
           <span className="opacity-30 hidden sm:inline">|</span>
           <span className="opacity-80 hidden sm:inline">Auto-refreshing live details</span>
         </div>
-        <div className="text-[#FBBF24] font-bold uppercase tracking-wider text-right">
+        <div className="text-[#F8FAFC] font-bold uppercase tracking-wider text-right">
           F1 Companion v2.0
         </div>
       </footer>

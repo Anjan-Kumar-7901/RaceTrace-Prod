@@ -1,15 +1,17 @@
 import express from "express";
-import path from "path";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const JOLPICA_API_BASE_URL = "https://api.jolpi.ca/ergast/f1";
+const CURRENT_F1_SEASON = String(new Date().getFullYear());
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
-app.use(express.json());
+app.disable("x-powered-by");
+app.set("trust proxy", 1);
+app.use(express.json({ limit: "100kb" }));
 
 // Initialize Gemini Client safely
 let ai: GoogleGenAI | null = null;
@@ -18,8 +20,9 @@ if (process.env.GEMINI_API_KEY) {
     ai = new GoogleGenAI({
       apiKey: process.env.GEMINI_API_KEY,
       httpOptions: {
+        timeout: 12000,
         headers: {
-          'User-Agent': 'aistudio-build',
+          'User-Agent': 'RaceTrace/1.0',
         }
       }
     });
@@ -28,7 +31,7 @@ if (process.env.GEMINI_API_KEY) {
     console.error("Failed to initialize Gemini client:", err);
   }
 } else {
-  console.warn("GEMINI_API_KEY not defined in server environment. News will utilize beautiful local curation.");
+  console.info("GEMINI_API_KEY not configured. News API will serve curated local fallback content.");
 }
 
 // Memory cache for active endpoints
@@ -56,17 +59,36 @@ function setCache<T>(key: string, data: T): void {
 
 let geminiDisabledUntil = 0;
 
-async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 2500): Promise<Response> {
+const DRIVER_NUMBER_OVERRIDES_2026: Record<string, number> = {
+  albon: 23, antonelli: 12, bearman: 87, bortoleto: 5, bottas: 77,
+  colapinto: 43, gasly: 10, hadjar: 6, hamilton: 44, hulkenberg: 27,
+  lawson: 30, leclerc: 16, norris: 1, ocon: 31, perez: 11,
+  piastri: 81, russell: 63, sainz: 55, stroll: 18, verstappen: 3
+};
+
+const VERIFIED_ACTIVE_DRIVER_CHAMPIONSHIPS: Record<string, number> = {
+  alonso: 2,
+  hamilton: 7,
+  max_verstappen: 4,
+  norris: 1,
+};
+
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 8000): Promise<Response> {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
     clearTimeout(id);
-    return response;
-  } catch (error) {
-    clearTimeout(id);
-    throw error;
   }
+}
+
+function setApiCacheHeaders(res: express.Response, maxAge = 600): void {
+  res.setHeader("Cache-Control", `public, max-age=0, s-maxage=${maxAge}, stale-while-revalidate=86400`);
+}
+
+function isRetryableStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
 // Realistic 2026 F1 Season Data (Fallback & Verification)
@@ -171,6 +193,36 @@ const FALLBACK_NEWS = [
   }
 ];
 
+function sanitizeNewsArticles(input: unknown): any[] {
+  if (!Array.isArray(input)) return [];
+
+  return input.flatMap((item: any, index: number) => {
+    const title = String(item?.title || "").trim();
+    const summary = String(item?.summary || "").trim();
+    const source = String(item?.source || "RaceTrace Curated").trim();
+    const publishedAt = String(item?.publishedAt || "Recently").trim();
+    const rawUrl = String(item?.url || "").trim();
+
+    let url: URL;
+    try {
+      url = new URL(rawUrl);
+    } catch {
+      return [];
+    }
+    if (!["http:", "https:"].includes(url.protocol) || !title || !summary) return [];
+
+    return [{
+      id: String(item?.id || `news-${index + 1}`),
+      title,
+      summary,
+      source,
+      publishedAt,
+      url: url.toString(),
+      imageUrl: "",
+    }];
+  }).slice(0, 6);
+}
+
 // Helper to make live timing dynamic mock data
 function generateLiveTiming(sessionType: string) {
   const baseTimes: Record<string, number> = {
@@ -210,7 +262,7 @@ function generateLiveTiming(sessionType: string) {
     return {
       driverId: d.id,
       driverName: d.name,
-      driverNumber: d.number,
+      driverNumber: getDriverNumber(d.id, d.number),
       team: d.team,
       lapValue,
       lapTime: formatLapTime(lapValue),
@@ -257,19 +309,38 @@ function formatLapTime(secs: number): string {
 
 // ENDPOINTS
 
+app.get("/api/health", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.json({
+    status: "ok",
+    service: "RaceTrace API",
+    season: Number(CURRENT_F1_SEASON),
+    jolpicaConfigured: true,
+    geminiConfigured: Boolean(ai),
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // Helper sanitizers to ensure runtime type compatibility with /src/types.ts
+function getDriverNumber(driverId: string, rawNumber: unknown): number {
+  if (CURRENT_F1_SEASON === "2026" && DRIVER_NUMBER_OVERRIDES_2026[driverId]) {
+    return DRIVER_NUMBER_OVERRIDES_2026[driverId];
+  }
+  return parseInt(String(rawNumber)) || 0;
+}
+
 function sanitizeDrivers(input: any[]): any[] {
   if (!Array.isArray(input)) return [];
   return input.map((d: any, idx: number) => {
     const id = String(d.id || d.driverId || "").toLowerCase().replace(/[^a-z0-9_-]/g, "") || "driver-" + idx;
     const name = String(d.name || d.driverName || d.familyName || "Unknown Driver");
-    const number = parseInt(d.number || d.driverNumber || d.permanentNumber) || (idx + 1);
+    const number = getDriverNumber(id, d.number || d.driverNumber || d.permanentNumber) || (idx + 1);
     const team = String(d.team || d.teamName || d.constructor || d.constructorName || "Independent");
     const points = parseFloat(d.points) || 0;
     const wins = parseInt(d.wins) || 0;
     const podiums = parseInt(d.podiums) || (wins > 0 ? wins + 1 : 0);
     const position = parseInt(d.position) || (idx + 1);
-    const form = Array.isArray(d.form) ? d.form.map(String) : ["P3", "P2", "P4", "P1", "P5"];
+    const form = Array.isArray(d.form) ? d.form.map(String) : [];
     const photoUrl = String(d.photoUrl || "https://images.unsplash.com/photo-1552519507-da3b142c6e3d?auto=format&fit=crop&q=80&w=200");
     return { id, name, number, team, points, wins, podiums, position, form, photoUrl };
   });
@@ -286,15 +357,131 @@ function sanitizeConstructors(input: any[]): any[] {
   });
 }
 
+function getApiDriverId(driverId: string): string {
+  const normalized = driverId.toLowerCase().replace(/[^a-z0-9_]/g, "");
+  const overrides: Record<string, string> = {
+    verstappen: "max_verstappen",
+  };
+  return overrides[normalized] || normalized;
+}
+
+async function wait(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchJolpicaJson(url: string, attempts = 3): Promise<any> {
+  const options = { headers: { "Accept": "application/json", "User-Agent": "RaceTrace/1.0" } };
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const response = await fetchWithTimeout(url, options, 10000);
+      if (!response.ok) {
+        const error = new Error(`Jolpica response ${response.status}`);
+        if (!isRetryableStatus(response.status)) throw error;
+        lastError = error;
+        if (attempt < attempts - 1) {
+          const retryAfter = Number(response.headers.get("retry-after"));
+          await wait(Number.isFinite(retryAfter) ? retryAfter * 1000 : 500 * (attempt + 1));
+          continue;
+        }
+        throw error;
+      }
+      return await response.json();
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts - 1) await wait(350 * (attempt + 1));
+    }
+  }
+
+  throw lastError;
+}
+
+async function getResponseTotal(url: string): Promise<number> {
+  const payload = await fetchJolpicaJson(url);
+  return parseInt(payload?.MRData?.total) || 0;
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(items[index]);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
+  return results;
+}
+
+async function getDriverCareerStats(driverId: string) {
+  const apiDriverId = getApiDriverId(driverId);
+  const currentSeason = Number(CURRENT_F1_SEASON);
+  const previousSeason = Number(CURRENT_F1_SEASON) - 1;
+
+  const [
+    wins, secondPlaces, thirdPlaces,
+    currentSecondPlaces, currentThirdPlaces,
+    currentStandingData, previousStandingData
+  ] = await mapWithConcurrency([
+    () => getResponseTotal(`${JOLPICA_API_BASE_URL}/drivers/${apiDriverId}/results/1/?limit=1`),
+    () => getResponseTotal(`${JOLPICA_API_BASE_URL}/drivers/${apiDriverId}/results/2/?limit=1`),
+    () => getResponseTotal(`${JOLPICA_API_BASE_URL}/drivers/${apiDriverId}/results/3/?limit=1`),
+    () => getResponseTotal(`${JOLPICA_API_BASE_URL}/${currentSeason}/drivers/${apiDriverId}/results/2/?limit=1`),
+    () => getResponseTotal(`${JOLPICA_API_BASE_URL}/${currentSeason}/drivers/${apiDriverId}/results/3/?limit=1`),
+    () => fetchJolpicaJson(`${JOLPICA_API_BASE_URL}/${currentSeason}/drivers/${apiDriverId}/driverstandings/?limit=1`),
+    () => fetchJolpicaJson(`${JOLPICA_API_BASE_URL}/${previousSeason}/drivers/${apiDriverId}/driverstandings/?limit=1`),
+  ], 3, (request) => request());
+
+  const currentStanding = currentStandingData?.MRData?.StandingsTable?.StandingsLists?.[0]?.DriverStandings?.[0];
+  const previousStanding = previousStandingData?.MRData?.StandingsTable?.StandingsLists?.[0]?.DriverStandings?.[0];
+  const currentWins = Number(currentStanding?.wins) || 0;
+  const championships = VERIFIED_ACTIVE_DRIVER_CHAMPIONSHIPS[apiDriverId] || 0;
+
+  return {
+    currentSeason,
+    currentPosition: Number(currentStanding?.position) || null,
+    currentPoints: Number(currentStanding?.points) || 0,
+    currentWins,
+    currentPodiums: currentWins + currentSecondPlaces + currentThirdPlaces,
+    careerWins: wins,
+    careerPodiums: wins + secondPlaces + thirdPlaces,
+    championships,
+    previousSeason,
+    previousSeasonPosition: Number(previousStanding?.position) || null,
+    source: "Jolpica F1 API",
+    championshipsSource: "Verified active-driver championship history",
+    verifiedAt: new Date().toISOString(),
+  };
+}
+
 function sanitizeCalendar(input: any[]): any[] {
   if (!Array.isArray(input)) return [];
   return input.map((r: any, idx: number) => {
     const round = parseInt(r.round) || (idx + 1);
     const name = String(r.name || r.raceName || "Grand Prix");
     const circuit = String(r.circuit || r.circuitName || "Racing Circuit");
+    const circuitId = r.circuitId ? String(r.circuitId) : undefined;
     const country = String(r.country || "Worldwide");
+    const location = r.location ? String(r.location) : undefined;
     const date = String(r.date || new Date().toISOString().split("T")[0]);
+    const startDate = r.startDate ? String(r.startDate) : undefined;
     const time = String(r.time || "12:00:00Z");
+    const totalRounds = parseInt(r.totalRounds) || input.length;
+    const laps = parseInt(r.laps) || undefined;
+    const lapRecord = r.lapRecord ? String(r.lapRecord) : undefined;
+    const lastWinner = r.lastWinner ? String(r.lastWinner) : undefined;
+    const lastWinnerYear = parseInt(r.lastWinnerYear) || undefined;
+    const poleSitter = r.poleSitter ? String(r.poleSitter) : undefined;
+    const poleYear = parseInt(r.poleYear) || undefined;
     
     // Check if status is completed or upcoming
     let status = r.status;
@@ -302,54 +489,145 @@ function sanitizeCalendar(input: any[]): any[] {
       const raceDate = new Date(`${date}T${time}`);
       status = raceDate.getTime() < Date.now() ? "completed" : "upcoming";
     }
-    return { round, name, circuit, country, date, time, status };
+    return {
+      round, name, circuit, circuitId, country, location, date, startDate, time, status,
+      totalRounds, laps, lapRecord, lastWinner, lastWinnerYear, poleSitter, poleYear
+    };
   });
 }
 
-// Helper to extract driver form
-function getDriverForm(code: string): string[] {
-  if (code.includes("verstappen")) return ["P1", "P2", "P1", "P1", "P3"];
-  if (code.includes("norris")) return ["P2", "P1", "P2", "P3", "P1"];
-  if (code.includes("leclerc")) return ["P3", "P4", "P1", "P2", "P2"];
-  return ["P8", "P6", "P10", "P11", "P9"];
+function normalizeRaceKey(value: unknown): string {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-function idxToPodiums(driverId: string): number {
-  if (driverId.includes("verstappen")) return 6;
-  if (driverId.includes("norris")) return 5;
-  if (driverId.includes("leclerc")) return 4;
-  if (driverId.includes("piastri")) return 3;
-  return 1;
+function racesMatch(candidate: any, target: any): boolean {
+  const candidateCircuitId = normalizeRaceKey(candidate.Circuit?.circuitId || candidate.circuitId);
+  const targetCircuitId = normalizeRaceKey(target.circuitId);
+  if (candidateCircuitId && targetCircuitId && candidateCircuitId === targetCircuitId) return true;
+
+  const candidateCircuit = normalizeRaceKey(candidate.Circuit?.circuitName || candidate.circuit);
+  const targetCircuit = normalizeRaceKey(target.circuit);
+  if (candidateCircuit && targetCircuit && candidateCircuit === targetCircuit) return true;
+
+  const candidateName = normalizeRaceKey(candidate.raceName || candidate.name);
+  const targetName = normalizeRaceKey(target.name);
+  if (candidateName && targetName && candidateName === targetName) return true;
+
+  const candidateLocation = normalizeRaceKey(candidate.Circuit?.Location?.locality || candidate.location);
+  const targetLocation = normalizeRaceKey(target.location);
+  return Boolean(candidateLocation && targetLocation && candidateLocation === targetLocation);
+}
+
+async function enrichNextRaceFromErgast(input: any[]): Promise<any[]> {
+  const races = sanitizeCalendar(input);
+  const nextRace = races.find((race) => race.status === "upcoming");
+  if (!nextRace) return races;
+
+  const previousSeason = String(new Date(nextRace.date).getUTCFullYear() - 1);
+  const options = { headers: { "Accept": "application/json", "User-Agent": "RaceTrace/1.0" } };
+
+  try {
+    const scheduleRes = await fetchWithTimeout(`${JOLPICA_API_BASE_URL}/${previousSeason}.json`, options, 8000);
+    if (!scheduleRes.ok) throw new Error(`Previous calendar response not ok: ${scheduleRes.status}`);
+    const scheduleData = await scheduleRes.json();
+    const previousSchedule = scheduleData?.MRData?.RaceTable?.Races || [];
+    const previousEvent = previousSchedule.find((race: any) => racesMatch(race, nextRace));
+    if (!previousEvent?.round) {
+      console.warn(`No ${previousSeason} event matched ${nextRace.name} at ${nextRace.circuit}`);
+      return races;
+    }
+
+    const [resultsRes, qualifyingRes] = await Promise.all([
+      fetchWithTimeout(`${JOLPICA_API_BASE_URL}/${previousSeason}/${previousEvent.round}/results/`, options, 8000),
+      fetchWithTimeout(`${JOLPICA_API_BASE_URL}/${previousSeason}/${previousEvent.round}/qualifying/`, options, 8000),
+    ]);
+    if (!resultsRes.ok) throw new Error(`Previous race result response not ok: ${resultsRes.status}`);
+
+    const resultsData = await resultsRes.json();
+    const previousRace = resultsData?.MRData?.RaceTable?.Races?.[0];
+    if (!previousRace) return races;
+
+    let poleSitter: string | undefined;
+    if (qualifyingRes.ok) {
+      const qualifyingData = await qualifyingRes.json();
+      const qualifyingRace = qualifyingData?.MRData?.RaceTable?.Races?.[0];
+      const poleDriver = qualifyingRace?.QualifyingResults?.[0]?.Driver;
+      if (poleDriver) poleSitter = `${poleDriver.givenName} ${poleDriver.familyName}`;
+    }
+
+    const winner = previousRace.Results?.[0];
+    const fastestResult = previousRace.Results?.find((result: any) => Number(result.FastestLap?.rank) === 1);
+
+    return races.map((race) => race.round === nextRace.round ? {
+      ...race,
+      circuitId: race.circuitId || previousRace.Circuit?.circuitId,
+      location: race.location || previousRace.Circuit?.Location?.locality,
+      laps: parseInt(winner?.laps) || race.laps,
+      lapRecord: fastestResult?.FastestLap?.Time?.time || race.lapRecord,
+      lastWinner: winner?.Driver ? `${winner.Driver.givenName} ${winner.Driver.familyName}` : race.lastWinner,
+      lastWinnerYear: parseInt(previousSeason),
+      poleSitter: poleSitter || race.poleSitter,
+      poleYear: poleSitter ? parseInt(previousSeason) : race.poleYear,
+    } : race);
+  } catch (error: any) {
+    console.warn(`Unable to enrich next race metadata from ${previousSeason}:`, error?.message || error);
+    return races;
+  }
+}
+
+interface DriverResultStats {
+  form: string[];
+  wins: number;
+  podiums: number;
+}
+
+async function getDriverResultStatsFromErgast(season: string): Promise<Record<string, DriverResultStats>> {
+  const resultsRes = await fetchWithTimeout(
+    `${JOLPICA_API_BASE_URL}/${season}/results/?limit=2000`,
+    { headers: { "Accept": "application/json", "User-Agent": "RaceTrace/1.0" } },
+    8000
+  );
+  if (!resultsRes.ok) throw new Error(`Race results response not ok: ${resultsRes.status}`);
+  const resultsData = await resultsRes.json();
+  const races = resultsData?.MRData?.RaceTable?.Races;
+  if (!Array.isArray(races)) return {};
+
+  const resultStats: Record<string, DriverResultStats> = {};
+  [...races].sort((a: any, b: any) => Number(a.round) - Number(b.round)).forEach((race: any) => {
+    race.Results?.forEach((result: any) => {
+      const driverId = result?.Driver?.driverId;
+      if (!driverId) return;
+      const position = parseInt(result.position);
+      const positionText = String(result.positionText || result.position || "NC").toUpperCase();
+      const statusLabels: Record<string, string> = { R: "DNF", D: "DSQ", E: "EX", F: "DNQ", N: "NC", W: "WD" };
+      const finish = /^\d+$/.test(positionText) ? `P${positionText}` : statusLabels[positionText] || positionText;
+      const stats = resultStats[driverId] || { form: [], wins: 0, podiums: 0 };
+      stats.form = [...stats.form, finish].slice(-5);
+      if (position === 1) stats.wins += 1;
+      if (position >= 1 && position <= 3) stats.podiums += 1;
+      resultStats[driverId] = stats;
+    });
+  });
+  return resultStats;
 }
 
 // Shared Network APIs Handlers for F1 Ergast DB with Season Auto-Fallback
 async function getStandingsFromErgast(season: string) {
-  const driverRes = await fetchWithTimeout(
-    `https://api.jolpica.com/ergast/f1/${season}/driverStandings.json`,
-    {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-      }
-    },
-    5000
-  );
+  const options = { headers: { "Accept": "application/json", "User-Agent": "RaceTrace/1.0" } };
+  const [driverRes, constructorRes, resultStats] = await Promise.all([
+    fetchWithTimeout(`${JOLPICA_API_BASE_URL}/${season}/driverstandings/`, options, 8000),
+    fetchWithTimeout(`${JOLPICA_API_BASE_URL}/${season}/constructorstandings/`, options, 8000),
+    getDriverResultStatsFromErgast(season).catch(() => ({}))
+  ]);
   if (!driverRes.ok) throw new Error(`Driver response not ok: ${driverRes.status}`);
   const optDrivers = await driverRes.json();
-
-  const constructorRes = await fetchWithTimeout(
-    `https://api.jolpica.com/ergast/f1/${season}/constructorStandings.json`,
-    {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-      }
-    },
-    5000
-  );
   if (!constructorRes.ok) throw new Error(`Constructor response not ok: ${constructorRes.status}`);
   const optConstructors = await constructorRes.json();
 
-  const standingList = optDrivers?.MRData?.StandingsTable?.StandingsList?.[0]?.DriverStandings;
-  const constList = optConstructors?.MRData?.StandingsTable?.StandingsList?.[0]?.ConstructorStandings;
+  const driverTable = optDrivers?.MRData?.StandingsTable;
+  const constructorTable = optConstructors?.MRData?.StandingsTable;
+  const standingList = (driverTable?.StandingsLists ?? driverTable?.StandingsList)?.[0]?.DriverStandings;
+  const constList = (constructorTable?.StandingsLists ?? constructorTable?.StandingsList)?.[0]?.ConstructorStandings;
 
   if (!standingList || standingList.length === 0 || !constList || constList.length === 0) {
     throw new Error(`Empty standings lists for season ${season}`);
@@ -359,16 +637,17 @@ async function getStandingsFromErgast(season: string) {
     const d = item.Driver;
     const t = item.Constructors[0];
     const code = d.driverId;
+    const stats = (resultStats as Record<string, any>)[code] || { form: [], wins: parseInt(item.wins) || 0, podiums: 0 };
     return {
       id: code,
       name: `${d.givenName} ${d.familyName}`,
-      number: parseInt(d.permanentNumber) || 0,
+      number: getDriverNumber(code, d.permanentNumber),
       team: t?.name || "Independent",
       points: parseFloat(item.points) || 0,
-      wins: parseInt(item.wins) || 0,
-      podiums: parseInt(item.wins) > 1 ? parseInt(item.wins) + 2 : idxToPodiums(code),
+      wins: stats.wins,
+      podiums: stats.podiums,
       position: parseInt(item.position) || 1,
-      form: getDriverForm(code)
+      form: stats.form
     };
   });
 
@@ -390,7 +669,7 @@ async function getStandingsFromErgast(season: string) {
 
 async function getCalendarFromErgast(season: string) {
   const calendarRes = await fetchWithTimeout(
-    `https://api.jolpica.com/ergast/f1/${season}.json`,
+    `${JOLPICA_API_BASE_URL}/${season}.json`,
     {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -412,164 +691,101 @@ async function getCalendarFromErgast(season: string) {
       round: parseInt(item.round) || 1,
       name: item.raceName || "Grand Prix",
       circuit: item.Circuit?.circuitName || "Racing Circuit",
+      circuitId: item.Circuit?.circuitId,
       country: item.Circuit?.Location?.country || "Worldwide",
+      location: item.Circuit?.Location?.locality,
       date: item.date || "2026-06-08",
+      startDate: item.FirstPractice?.date,
       time: item.time || "12:00:00Z",
       status: isPast ? "completed" : "upcoming",
+      totalRounds: rawRaces.length,
     };
   });
 
-  return sanitizeCalendar(races);
+  return enrichNextRaceFromErgast(races);
 }
 
 // 1. Current Standings (Driver + Constructor)
 app.get("/api/f1/standings", async (req, res) => {
+  setApiCacheHeaders(res);
   const cached = getCached<{ drivers: any[]; constructors: any[] }>("standings");
   if (cached) {
     return res.json(cached);
   }
 
-  // Dual-Pipeline Pattern: Pipeline A (Search Grounding), Pipeline B (Jolpica Live API Network), Pipeline C (Offline Fallback)
-  if (ai && Date.now() > geminiDisabledUntil) {
-    try {
-      console.log("Leveraging Gemini Search Grounding for live F1 standings...");
-      const prompt = "Retrieve the latest, fully up-to-date, real-world Formula 1 driver standings AND constructor (team) standings for the current season. Return the response strictly as a JSON object, with NO markdown fences or backticks. Format it exactly like this:\n" +
-        "{\n" +
-        "  \"drivers\": [\n" +
-        "    { \"id\": \"verstappen\", \"name\": \"Max Verstappen\", \"number\": 1, \"team\": \"Red Bull Racing\", \"points\": 258, \"wins\": 6, \"podiums\": 9, \"position\": 1, \"form\": [\"P1\", \"P2\", \"P1\", \"P1\", \"P3\"] }\n" +
-        "  ],\n" +
-        "  \"constructors\": [\n" +
-        "    { \"id\": \"mclaren\", \"name\": \"McLaren\", \"points\": 436, \"position\": 1 }\n" +
-        "  ]\n" +
-        "}\n" +
-        "Make sure ALL drivers in the current real-world standings are listed in order, with their correct positions, numbers, teams, points, wins, and realistic 'form' list. Provide 15 to 20 drivers. Ensure the JSON is valid and completely clean.";
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: prompt,
-        config: {
-          tools: [{ googleSearch: {} }],
-          responseMimeType: "application/json",
-        }
-      });
-
-      const rawText = response.text || "";
-      const cleanedText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
-      const parsedData = JSON.parse(cleanedText);
-      if (parsedData && Array.isArray(parsedData.drivers) && Array.isArray(parsedData.constructors)) {
-        console.log("Successfully retrieved live standings from Gemini Search Grounding!");
-        const sanitized = {
-          drivers: sanitizeDrivers(parsedData.drivers),
-          constructors: sanitizeConstructors(parsedData.constructors)
-        };
-        setCache("standings", sanitized);
-        return res.json(sanitized);
-      }
-    } catch (gErr: any) {
-      const errMsg = gErr?.message || String(gErr);
-      if (errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("429") || errMsg.includes("quota")) {
-        console.warn("Gemini Search Grounding rate limit (429) hit inside Standings. Circuit breaker active. Offline/Network api fallback activated.");
-        geminiDisabledUntil = Date.now() + 15 * 60 * 1000; // block for 15 minutes
-      } else {
-        console.warn("Gemini standings grounding query failed, falling back to network API:", errMsg);
-      }
-    }
-  }
-
+  // Standings must remain deterministic: Jolpica standings + race results only.
   try {
     console.log("Fetching live standings from network API...");
     try {
-      const liveData = await getStandingsFromErgast("current");
+      const liveData = await getStandingsFromErgast(CURRENT_F1_SEASON);
       setCache("standings", liveData);
       return res.json(liveData);
-    } catch (currentErr) {
-      console.log("Current season standings empty or unsupported on network API, checking 2024 season archive...");
-      const backupData = await getStandingsFromErgast("2024");
+    } catch (currentErr: any) {
+      console.warn(`${CURRENT_F1_SEASON} standings unavailable (${currentErr?.message || currentErr}), checking current season alias...`);
+      const backupData = await getStandingsFromErgast("current");
       setCache("standings", backupData);
       return res.json(backupData);
     }
-  } catch (err) {
-    console.log("Live standings database offline. Seamlessly utilizing immersive 2026 curated standings.");
+  } catch (err: any) {
+    console.warn(`Live standings database unavailable (${err?.message || err}). Utilizing curated 2026 standings.`);
     const data = {
-      drivers: sanitizeDrivers(DRIVERS_2026),
+      drivers: sanitizeDrivers(DRIVERS_2026.map((driver) => ({ ...driver, form: [] }))),
       constructors: sanitizeConstructors(CONSTRUCTORS_2026)
     };
     res.json(data);
   }
 });
 
+app.get("/api/f1/drivers/:driverId/career", async (req, res) => {
+  const driverId = String(req.params.driverId || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
+  if (!driverId) return res.status(400).json({ error: "Driver id is required" });
+
+  setApiCacheHeaders(res, 3600);
+  const cacheKey = `career-v3-${driverId}`;
+  const cached = getCached<any>(cacheKey);
+  if (cached) return res.json(cached);
+
+  try {
+    const careerStats = await getDriverCareerStats(driverId);
+    setCache(cacheKey, careerStats);
+    return res.json(careerStats);
+  } catch (error: any) {
+    console.warn(`Career statistics unavailable for ${driverId}:`, error?.message || error);
+    return res.status(502).json({ error: "Career statistics unavailable" });
+  }
+});
+
 // 2. F1 Season Calendar
 app.get("/api/f1/calendar", async (req, res) => {
+  setApiCacheHeaders(res, 3600);
   const cached = getCached<any[]>("calendar");
   if (cached) {
     return res.json(cached);
   }
 
-  // Pipeline A: Search Grounding
-  if (ai && Date.now() > geminiDisabledUntil) {
-    try {
-      console.log("Leveraging Gemini Search Grounding for live F1 calendar...");
-      const prompt = "Retrieve the complete official Formula 1 race calendar/schedule for the current season. Return the response strictly as a JSON array of races, with NO markdown formatting or fences. Format each race item exactly like this:\n" +
-        "{\n" +
-        "  \"round\": 1,\n" +
-        "  \"name\": \"Australian Grand Prix\",\n" +
-        "  \"circuit\": \"Albert Park Circuit\",\n" +
-        "  \"country\": \"Australia\",\n" +
-        "  \"date\": \"2025-03-16\",\n" +
-        "  \"time\": \"05:00:00Z\",\n" +
-        "  \"status\": \"completed\"\n" +
-        "}\n" +
-        "Determine the 'status' (completed vs upcoming) dynamically based on whether the race has happened or scheduled in the future relative to current date (and current local time is June 2026, so races prior to June 2026 are completed, and those after are upcoming). Ensure the response is valid un-truncated JSON of the full race calendar.";
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: prompt,
-        config: {
-          tools: [{ googleSearch: {} }],
-          responseMimeType: "application/json",
-        }
-      });
-
-      const rawText = response.text || "";
-      const cleanedText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
-      const races = JSON.parse(cleanedText);
-      if (Array.isArray(races) && races.length > 0) {
-        console.log("Successfully retrieved live calendar from Gemini Search Grounding!");
-        const sanitized = sanitizeCalendar(races);
-        setCache("calendar", sanitized);
-        return res.json(sanitized);
-      }
-    } catch (gErr: any) {
-      const errMsg = gErr?.message || String(gErr);
-      if (errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("429") || errMsg.includes("quota")) {
-        console.warn("Gemini Search Grounding rate limit (429) hit inside Calendar. Circuit breaker active. Offline/Network api fallback activated.");
-        geminiDisabledUntil = Date.now() + 15 * 60 * 1000; // block for 15 minutes
-      } else {
-        console.warn("Gemini calendar grounding query failed, falling back to network API:", errMsg);
-      }
-    }
-  }
-
   try {
-    console.log("Fetching live race calendar from network API...");
+    console.log("Fetching race calendar from Jolpica...");
     try {
-      const liveCal = await getCalendarFromErgast("current");
+      const liveCal = await getCalendarFromErgast(CURRENT_F1_SEASON);
       setCache("calendar", liveCal);
       return res.json(liveCal);
     } catch (currentCalErr) {
-      console.log("Current season calendar empty or unsupported on network API, checking 2024 season archive...");
-      const backupCal = await getCalendarFromErgast("2024");
+      console.warn(`${CURRENT_F1_SEASON} calendar unavailable, checking current season alias...`);
+      const backupCal = await getCalendarFromErgast("current");
       setCache("calendar", backupCal);
       return res.json(backupCal);
     }
   } catch (err) {
-    console.log("Live race calendars offline. Seamlessly utilizing immersive 2026 curated calendar schedule.");
-    res.json(sanitizeCalendar(CALENDAR_2026));
+    console.warn("Jolpica calendar unavailable. Using curated season fallback.");
+    const fallback = await enrichNextRaceFromErgast(CALENDAR_2026);
+    setCache("calendar", fallback);
+    res.json(fallback);
   }
 });
 
 // 3. F1 News (Curated Live via Gemini Search Grounding or Offline fallback)
 app.get("/api/f1/news", async (req, res) => {
+  setApiCacheHeaders(res);
   const cached = getCached<any[]>("news");
   if (cached) {
     return res.json(cached);
@@ -579,8 +795,8 @@ app.get("/api/f1/news", async (req, res) => {
     try {
       console.log("Leveraging Gemini Search Grounding for live F1 telemetry news...");
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: "Produce a list of the 6 coordinates/articles of real major Formula 1 news headlines and announcements from the current ongoing 2026 season. Return the response strictly as a JSON array of objects. Do NOT wrap the JSON inside any markdown fences like ```json ... ```. Each object in the array must contain: 'id' (string, e.g. news-1), 'title' (string), 'summary' (string), 'source' (string), 'publishedAt' (string description, e.g. '3 hours ago'), 'url' (string, source headline link or f1.com), 'imageUrl' (string, provide a high quality automotive picture from unsplash.com related to cars/racing, e.g. https://images.unsplash.com/photo-1511919884226-fd3cad34687c?auto=format&fit=crop&q=80&w=400). Ensure the JSON is completely standard and un-truncated.",
+        model: GEMINI_MODEL,
+        contents: `Produce a list of 6 real major Formula 1 news articles from the current ${CURRENT_F1_SEASON} season. Return strictly a JSON array without markdown. Each object must contain id, title, summary, source, publishedAt, and a direct https URL to the source article. Do not invent sources or URLs.`,
         config: {
           tools: [{ googleSearch: {} }],
           responseMimeType: "application/json",
@@ -589,8 +805,8 @@ app.get("/api/f1/news", async (req, res) => {
 
       const rawText = response.text || "";
       const cleanedText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
-      const newsArray = JSON.parse(cleanedText);
-      if (Array.isArray(newsArray) && newsArray.length > 0) {
+      const newsArray = sanitizeNewsArticles(JSON.parse(cleanedText));
+      if (newsArray.length > 0) {
         setCache("news", newsArray);
         return res.json(newsArray);
       }
@@ -605,12 +821,14 @@ app.get("/api/f1/news", async (req, res) => {
     }
   }
 
-  // Fallback news
-  res.json(FALLBACK_NEWS);
+  const fallbackNews = sanitizeNewsArticles(FALLBACK_NEWS);
+  setCache("news", fallbackNews);
+  res.json(fallbackNews);
 });
 
 // 4. Live Timing Simulation Stream
 app.get("/api/f1/live-timing", (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
   const session = (req.query.session as string) || "Race";
   const data = generateLiveTiming(session);
   res.json({
@@ -625,29 +843,15 @@ app.get("/api/f1/live-timing", (req, res) => {
   });
 });
 
+app.use("/api", (_req, res) => {
+  res.status(404).json({ error: "API route not found" });
+});
 
-// 5. DEV & PRODUCTION SERVER FLOW
-async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
-    // Vite Dev Integration mode
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-    console.log("Mounted Vite middleware on Express server.");
-  } else {
-    // Serve static bundle
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
+app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error("Unhandled API error:", error);
+  if (!res.headersSent) {
+    res.status(500).json({ error: "Internal server error" });
   }
+});
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`RaceTrace server running on http://localhost:${PORT}`);
-  });
-}
-
-startServer();
+export default app;

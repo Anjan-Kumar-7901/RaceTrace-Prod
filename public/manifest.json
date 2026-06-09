@@ -1,22 +1,24 @@
 {
   "short_name": "RaceTrace",
-  "name": "RaceTrace - F1 Companion PWA",
+  "name": "RaceTrace",
   "description": "Premium futuristic motorsport race-control dashboard with telemetries, standings, countdowns, and live timings.",
   "icons": [
     {
-      "src": "https://img.icons8.com/nolan/256/formula-one-car.png",
-      "sizes": "256x256",
-      "type": "image/png"
+      "src": "/racetrace-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
     },
     {
-      "src": "https://img.icons8.com/nolan/512/formula-one-car.png",
-      "sizes": "512x512",
-      "type": "image/png"
+      "src": "/racetrace-icon.png",
+      "sizes": "128x128",
+      "type": "image/png",
+      "purpose": "any"
     }
   ],
   "start_url": "/",
-  "background_color": "#070B14",
-  "theme_color": "#9D4EDD",
+  "background_color": "#080808",
+  "theme_color": "#080808",
   "display": "standalone",
   "orientation": "portrait"
 }

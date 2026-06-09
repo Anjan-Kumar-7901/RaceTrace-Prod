@@ -1,43 +1,71 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "ui-sans-serif", "system-ui", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "Roboto", "Helvetica Neue", "Arial", "sans-serif";
-  --font-display: "ui-sans-serif", "system-ui", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "Roboto", "Helvetica Neue", "Arial", "sans-serif";
-  --font-mono: "ui-monospace", "SFMono-Regular", "SF Pro Mono", "Consolas", "Liberation Mono", "Menlo", "monospace";
+  --font-sans: "Exo 2", "ui-sans-serif", "system-ui", "sans-serif";
+  --font-display: "Orbitron", "Exo 2", "ui-sans-serif", "system-ui", "sans-serif";
+  --font-mono: "JetBrains Mono", "ui-monospace", "SFMono-Regular", "Consolas", "monospace";
+  --font-editorial: "Playfair Display", "Georgia", "serif";
 }
 
 /* Custom design system styling based on your color palette */
 :root {
-  --carbon: #09090B;
-  --carbon-2: #111114;
-  --carbon-3: #151519;
+  --carbon: #080808;
+  --carbon-2: #101010;
+  --carbon-3: #121212;
 
-  --paper: #18181B;
-  --paper-2: #1F1F23;
-  --paper-3: #26262B;
+  --paper: #151515;
+  --paper-2: #1B1B1B;
+  --paper-3: #222222;
 
   --ink: #FAFAFA;
-  --ink-2: #D4D4D8;
-  --ink-3: #A1A1AA;
+  --ink-2: #E5E7EB;
+  --ink-3: #9CA3AF;
 
-  --racing: #F59E0B;
-  --racing-hot: #FBBF24;
-  --racing-soft: #FCD34D;
+  --racing: #D1D5DB;
+  --racing-hot: #F8FAFC;
+  --racing-soft: #E5E7EB;
 
   --rule-light: rgba(255, 255, 255, 0.08);
+
+  --mercedes: #00D2BE;
+  --ferrari: #DC0000;
+  --mclaren: #FF8700;
+  --redbull: #1E41FF;
+  --williams: #00A3E0;
+  --haas: #B6BABD;
+  --alpine: #FF87BC;
+  --audi: #00C853;
+  --racingbulls: #8EA2FF;
+  --aston: #006F62;
+  --cadillac: #8C8C8C;
 }
 
 body {
-  background-color: var(--carbon);
+  background:
+    radial-gradient(circle at top right, rgba(209, 213, 219, 0.08), transparent 35%),
+    radial-gradient(circle at bottom left, rgba(248, 250, 252, 0.05), transparent 40%),
+    var(--carbon);
   color: var(--ink);
   font-family: var(--font-sans);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(circle at center, black, transparent 78%);
 }
 
 /* Classic card design - simple, clear lines */
 .f1-card {
   background-color: var(--paper);
   border: 1px solid var(--rule-light);
-  border-radius: 12px;
+  border-radius: 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
@@ -45,7 +73,442 @@ body {
   background-color: var(--paper);
   border: 1px solid var(--racing);
   border-radius: 12px;
-  box-shadow: 0 4px 16px rgba(245, 158, 11, 0.15);
+  box-shadow: 0 4px 16px rgba(209, 213, 219, 0.15);
+}
+
+#hero-dashboard-panel,
+#race-countdown-section,
+#lap-timing-visualizer-section,
+#favorite-driver-profile,
+#race-calendar-section,
+#driver-standings-card,
+#constructor-standings-card,
+#f1-news-section {
+  background: var(--paper);
+  border: 1px solid var(--rule-light);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+  transition: transform 180ms ease, box-shadow 180ms ease, background 180ms ease;
+}
+
+#hero-dashboard-panel:hover,
+#race-countdown-section:hover,
+#lap-timing-visualizer-section:hover,
+#favorite-driver-profile:hover,
+#race-calendar-section:hover,
+#driver-standings-card:hover,
+#constructor-standings-card:hover,
+#f1-news-section:hover {
+  transform: translateY(-2px);
+  background: var(--paper-2);
+  box-shadow: 0 0 20px rgba(209, 213, 219, 0.22), 0 12px 32px rgba(0, 0, 0, 0.32);
+}
+
+#hero-dashboard-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at top right, rgba(209, 213, 219, 0.10), transparent 30%),
+    linear-gradient(115deg, rgba(255, 255, 255, 0.04), transparent 40%);
+  pointer-events: none;
+}
+
+.hero-underline {
+  width: min(320px, 70vw);
+  height: 3px;
+  background: var(--racing);
+  margin-top: 24px;
+  transform-origin: left;
+  animation: underline-draw 850ms ease-out both;
+  box-shadow: 0 0 20px rgba(209, 213, 219, 0.35);
+}
+
+.hero-user-name {
+  color: #EFFF00;
+  text-shadow:
+    0 0 8px rgba(239, 255, 0, 0.42),
+    0 0 22px rgba(239, 255, 0, 0.18);
+}
+
+.next-race-panel {
+  padding: clamp(24px, 4vw, 48px);
+  background:
+    repeating-linear-gradient(132deg, rgba(255, 255, 255, 0.018) 0 2px, transparent 2px 16px),
+    #080808;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-top: 3px solid #F8FAFC;
+  border-radius: 0;
+}
+
+#race-countdown-section.next-race-panel,
+#race-countdown-section.next-race-panel:hover {
+  background:
+    repeating-linear-gradient(132deg, rgba(255, 255, 255, 0.018) 0 2px, transparent 2px 16px),
+    #080808;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-top: 3px solid #F8FAFC;
+  border-radius: 0;
+  transform: none;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.32);
+}
+
+.next-race-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.22em;
+  max-width: 760px;
+  color: #EFFF00;
+  font-family: var(--font-display);
+  font-size: clamp(2.6rem, 6vw, 5.5rem);
+  font-weight: 800;
+  line-height: 0.94;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.next-race-title em {
+  color: #F8FAFC;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.next-race-facts {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.8fr) minmax(180px, 1.35fr) minmax(180px, 1.35fr) minmax(110px, 0.8fr);
+  gap: 28px;
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.next-race-facts span,
+.next-race-facts strong {
+  display: block;
+}
+
+.next-race-facts span {
+  color: #9CA3AF;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.next-race-facts strong {
+  margin-top: 8px;
+  color: #F8FAFC;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.next-race-facts small {
+  color: #9CA3AF;
+  font-size: inherit;
+}
+
+.next-race-timer {
+  min-width: 0;
+  padding: 22px 10px 18px;
+  background: #1B1B1B;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  text-align: center;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.next-race-timer span,
+.next-race-timer small {
+  display: block;
+  font-family: var(--font-display);
+}
+
+.next-race-timer span {
+  color: #fff;
+  font-size: clamp(2rem, 4vw, 3.25rem);
+  font-weight: 800;
+  line-height: 1;
+}
+
+.next-race-timer small {
+  margin-top: 12px;
+  color: #9CA3AF;
+  font-family: var(--font-mono);
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 720px) {
+  .next-race-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+}
+
+#main-header h1,
+#hero-dashboard-panel h2,
+#fav-driver-header h3,
+#news-header h3,
+#driver-standings-card h3,
+#constructor-standings-card h3,
+#calendar-header h3,
+#timing-control-header h3 {
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+#fav-driver-stats > div,
+#clock-telemetry-badge,
+#online-timing-dashboard > div:first-child,
+#offline-timing-banner,
+#calendar-scroller > div,
+#news-cards-grid > a,
+#driver-avatar {
+  border-radius: 8px;
+  border: 1px solid var(--rule-light);
+}
+
+#fav-driver-stats > div {
+  position: relative;
+  overflow: hidden;
+}
+
+#fav-driver-stats > div::after,
+#clock-telemetry-badge::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--racing);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 220ms ease;
+}
+
+#fav-driver-stats > div:hover::after,
+#clock-telemetry-badge:hover::after {
+  transform: scaleX(1);
+}
+
+#fav-driver-stats [class*="text-base"],
+#fav-driver-stats [class*="text-lg"],
+#driver-standings-table td:last-child,
+#constructor-standings-table td:last-child,
+#clock-telemetry-badge p {
+  font-family: var(--font-mono);
+}
+
+.telemetry-row {
+  background: transparent;
+  animation: row-entry 420ms ease both;
+}
+
+.telemetry-row > td:first-child {
+  position: relative;
+}
+
+.telemetry-row > td:first-child::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 4px;
+  background: var(--racing);
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.telemetry-row:hover {
+  background: rgba(209, 213, 219, 0.06);
+}
+
+.telemetry-row:hover > td:first-child::before {
+  opacity: 1;
+}
+
+.team-standings-row {
+  --team-color: var(--racing);
+}
+
+.team-standings-row > td:first-child::before {
+  background: var(--team-color);
+}
+
+.team-standings-row:hover {
+  background: color-mix(in srgb, var(--team-color) 10%, transparent);
+}
+
+.team-position-badge {
+  color: var(--team-color);
+  background: color-mix(in srgb, var(--team-color) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--team-color) 35%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--team-color) 18%, transparent);
+}
+
+.team-standings-row:hover .team-position-badge {
+  background: var(--team-color);
+  color: #080808;
+}
+
+.team-driver-card {
+  --team-color: var(--racing);
+  border-color: color-mix(in srgb, var(--team-color) 28%, rgba(255, 255, 255, 0.08));
+  box-shadow: 0 0 0 transparent;
+}
+
+.team-driver-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: var(--team-color);
+  opacity: 0.72;
+  z-index: 25;
+  transition: opacity 180ms ease;
+}
+
+.team-driver-card:hover,
+.team-driver-card.is-selected {
+  transform: translateY(-2px);
+  border-color: var(--team-color);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--team-color) 28%, transparent);
+}
+
+.team-driver-card.is-selected {
+  background: color-mix(in srgb, var(--team-color) 8%, #1B1B1B);
+}
+
+.team-driver-card:hover::before,
+.team-driver-card.is-selected::before {
+  opacity: 1;
+}
+
+.team-driver-number,
+.team-driver-team {
+  color: var(--team-color);
+  background: color-mix(in srgb, var(--team-color) 9%, #080808);
+  border-color: color-mix(in srgb, var(--team-color) 38%, rgba(255, 255, 255, 0.08));
+}
+
+.team-driver-avatar {
+  color: var(--team-color);
+  background: #151515;
+  border: 1px solid color-mix(in srgb, var(--team-color) 38%, rgba(255, 255, 255, 0.08));
+  box-shadow: 0 0 16px color-mix(in srgb, var(--team-color) 16%, transparent);
+}
+
+.team-driver-card:hover .team-driver-avatar,
+.team-driver-card.is-selected .team-driver-avatar {
+  color: #080808;
+  background: var(--team-color);
+  border-color: var(--team-color);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--team-color) 32%, transparent);
+}
+
+.news-card {
+  border-radius: 8px;
+  transition: transform 180ms ease, box-shadow 180ms ease, padding-left 180ms ease, background 180ms ease;
+}
+
+.news-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 16px;
+  bottom: 16px;
+  width: 3px;
+  background: var(--racing);
+  transform: scaleY(0.25);
+  transform-origin: top;
+  transition: transform 180ms ease;
+  z-index: 10;
+}
+
+.news-card:hover {
+  transform: translateY(-2px);
+  padding-left: 6px;
+  background: var(--paper-3);
+  box-shadow: 0 0 20px rgba(209, 213, 219, 0.22);
+}
+
+.news-card:hover::before {
+  transform: scaleY(1);
+}
+
+.animate-slide-up {
+  animation: slide-up 520ms ease both;
+}
+
+.footer-signature {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 9px;
+  border: 1px solid rgba(239, 255, 0, 0.34);
+  border-radius: 4px;
+  background: rgba(239, 255, 0, 0.07);
+  color: #EFFF00;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  box-shadow: 0 0 14px rgba(239, 255, 0, 0.16);
+  overflow: hidden;
+}
+
+.footer-signature strong {
+  color: #EFFF00;
+  font-weight: 800;
+}
+
+.footer-signature::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: #EFFF00;
+  box-shadow: 0 0 10px rgba(239, 255, 0, 0.55);
+  transform-origin: left;
+  animation: underline-draw 850ms ease-out both;
+}
+
+.team-favorite-card {
+  --team-color: var(--racing);
+}
+
+.team-favorite-card:hover {
+  box-shadow: 0 0 20px color-mix(in srgb, var(--team-color) 35%, transparent), 0 12px 32px rgba(0, 0, 0, 0.34);
+}
+
+.team-accent-tile {
+  background: color-mix(in srgb, var(--team-color) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--team-color) 28%, transparent);
+}
+
+.team-avatar-ring {
+  border-color: var(--team-color);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--team-color) 28%, transparent);
+}
+
+.team-stat-card::after {
+  background: var(--team-color) !important;
+}
+
+.team-stat-card:hover {
+  border-color: color-mix(in srgb, var(--team-color) 34%, rgba(255, 255, 255, 0.08));
 }
 
 /* Clean progress bars */
@@ -71,8 +534,66 @@ body {
   animation: ticker-scroll 35s linear infinite;
 }
 
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes row-entry {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes underline-draw {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
 .ticker-scroll-content:hover {
   animation-play-state: paused;
+}
+
+.race-calendar-scroller {
+  scrollbar-width: thin;
+  scrollbar-color: #D1D5DB #080808;
+  scroll-behavior: smooth;
+  overscroll-behavior-inline: contain;
+}
+
+.race-calendar-scroller::-webkit-scrollbar {
+  height: 10px;
+}
+
+.race-calendar-scroller::-webkit-scrollbar-track {
+  background: #080808;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+}
+
+.race-calendar-scroller::-webkit-scrollbar-thumb {
+  background: #9CA3AF;
+  border: 2px solid #080808;
+  border-radius: 2px;
+}
+
+.race-calendar-scroller::-webkit-scrollbar-thumb:hover {
+  background: #F8FAFC;
 }
 
 /* Custom simple scrollbars */
@@ -92,4 +613,143 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--racing);
+}
+
+/* Dashboard light theme */
+.light-theme {
+  --carbon: #F4F4F5;
+  --carbon-2: #FFFFFF;
+  --carbon-3: #F1F1F2;
+  --paper: #FFFFFF;
+  --paper-2: #F7F7F8;
+  --paper-3: #E5E7EB;
+  --ink: #09090B;
+  --ink-2: #27272A;
+  --ink-3: #6B7280;
+  --racing: #52525B;
+  --racing-hot: #18181B;
+  --racing-soft: #71717A;
+  --rule-light: rgba(9, 9, 11, 0.12);
+  color: #09090B;
+  background:
+    radial-gradient(circle at top right, rgba(9, 9, 11, 0.045), transparent 35%),
+    #F4F4F5 !important;
+}
+
+.light-theme [class*="bg-[#080808]"] {
+  background-color: #F4F4F5 !important;
+}
+
+.light-theme [class*="bg-[#101010]"] {
+  background-color: #F7F7F8 !important;
+}
+
+.light-theme [class*="bg-[#151515]"],
+.light-theme [class*="bg-[#1B1B1B]"] {
+  background-color: #FFFFFF !important;
+}
+
+.light-theme [class*="text-white"],
+.light-theme [class*="text-[#F8FAFC]"],
+.light-theme [class*="text-[#E5E7EB]"] {
+  color: #09090B !important;
+}
+
+.light-theme [class*="text-[#9CA3AF]"],
+.light-theme [class*="text-[#D1D5DB]"] {
+  color: #6B7280 !important;
+}
+
+.light-theme [class*="border-white/"] {
+  border-color: rgba(9, 9, 11, 0.12) !important;
+}
+
+.light-theme #main-header,
+.light-theme #operational-footer,
+.light-theme #top-ticker-section {
+  background: #FFFFFF !important;
+  border-color: rgba(9, 9, 11, 0.12) !important;
+}
+
+.light-theme #hero-dashboard-panel,
+.light-theme #lap-timing-visualizer-section,
+.light-theme #favorite-driver-profile,
+.light-theme #race-calendar-section,
+.light-theme #driver-standings-card,
+.light-theme #constructor-standings-card,
+.light-theme #f1-news-section {
+  background: #FFFFFF !important;
+  border-color: rgba(9, 9, 11, 0.12) !important;
+  box-shadow: 0 12px 32px rgba(9, 9, 11, 0.08);
+}
+
+.light-theme #race-countdown-section.next-race-panel,
+.light-theme #race-countdown-section.next-race-panel:hover {
+  background:
+    repeating-linear-gradient(132deg, rgba(9, 9, 11, 0.025) 0 2px, transparent 2px 16px),
+    #FFFFFF !important;
+  border-color: rgba(9, 9, 11, 0.18) !important;
+  border-top-color: #18181B !important;
+  box-shadow: 0 14px 36px rgba(9, 9, 11, 0.09);
+}
+
+.light-theme .next-race-facts {
+  border-top-color: rgba(9, 9, 11, 0.18);
+}
+
+.light-theme .next-race-facts span {
+  color: #52525B !important;
+}
+
+.light-theme .next-race-facts strong {
+  color: #09090B !important;
+  font-weight: 800;
+}
+
+.light-theme .next-race-facts small {
+  color: #52525B !important;
+  font-weight: 700;
+}
+
+.light-theme .next-race-timer {
+  background: #F4F4F5;
+  border-color: rgba(9, 9, 11, 0.16);
+}
+
+.light-theme .next-race-timer span {
+  color: #09090B !important;
+}
+
+.light-theme .next-race-timer small {
+  color: #52525B !important;
+}
+
+.light-theme .next-race-title,
+.light-theme .hero-user-name,
+.light-theme .footer-signature,
+.light-theme .footer-signature strong {
+  color: #B5C400 !important;
+}
+
+.light-theme .next-race-title em {
+  color: #09090B !important;
+}
+
+.light-theme-body {
+  background: #F4F4F5;
+}
+
+.light-theme .race-calendar-scroller {
+  scrollbar-color: #71717A #E5E7EB;
+}
+
+.light-theme .race-calendar-scroller::-webkit-scrollbar-track,
+.light-theme ::-webkit-scrollbar-track {
+  background: #E5E7EB;
+}
+
+.light-theme .race-calendar-scroller::-webkit-scrollbar-thumb,
+.light-theme ::-webkit-scrollbar-thumb {
+  background: #71717A;
+  border-color: #E5E7EB;
 }
