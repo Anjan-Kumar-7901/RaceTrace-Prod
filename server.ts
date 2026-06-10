@@ -736,8 +736,8 @@ app.get("/api/f1/standings", async (req, res) => {
   }
 });
 
-app.get("/api/f1/drivers/:driverId/career", async (req, res) => {
-  const driverId = String(req.params.driverId || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
+async function serveDriverCareer(req: express.Request, res: express.Response) {
+  const driverId = String(req.params.driverId || req.query.driverId || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
   if (!driverId) return res.status(400).json({ error: "Driver id is required" });
 
   setApiCacheHeaders(res, 3600);
@@ -753,7 +753,10 @@ app.get("/api/f1/drivers/:driverId/career", async (req, res) => {
     console.warn(`Career statistics unavailable for ${driverId}:`, error?.message || error);
     return res.status(502).json({ error: "Career statistics unavailable" });
   }
-});
+}
+
+app.get("/api/f1/drivers/:driverId/career", serveDriverCareer);
+app.get("/api/f1/career", serveDriverCareer);
 
 // 2. F1 Season Calendar
 app.get("/api/f1/calendar", async (req, res) => {

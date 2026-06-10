@@ -127,7 +127,7 @@ Fallback data keeps the interface available, but it may not represent the latest
 | --- | --- |
 | `GET /api/health` | Returns deployment health and integration configuration status. |
 | `GET /api/f1/standings` | Returns normalized current driver and constructor standings. |
-| `GET /api/f1/drivers/:driverId/career` | Returns verified current-season, career, championship, and previous-season statistics for a driver. |
+| `GET /api/f1/career?driverId=:driverId` | Returns verified current-season, career, championship, and previous-season statistics for a driver. |
 | `GET /api/f1/calendar` | Returns the season calendar and enriched next-race metadata. |
 | `GET /api/f1/news` | Returns grounded Gemini news or curated fallback articles. |
 | `GET /api/f1/live-timing?session=Race` | Returns simulated dynamic timing data for the selected session. |
@@ -235,7 +235,7 @@ The production server serves the built frontend and the RaceTrace API routes fro
 
 ## Deploying to Vercel
 
-The repository includes `vercel.json` and a native Vercel catch-all Express function at `api/[...path].ts`.
+The repository includes `vercel.json` and explicit Vercel functions for every production API endpoint under `api/`.
 
 1. Import the repository into Vercel.
 2. Keep the detected framework preset as Vite.

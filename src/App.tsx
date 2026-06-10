@@ -228,7 +228,7 @@ export default function App() {
 
     const loadCareerStats = async (attempt = 0) => {
       try {
-        const payload = await fetchJsonWithTimeout<DriverCareerStats>(`/api/f1/drivers/${encodeURIComponent(favoriteDriver.id)}/career`, {
+        const payload = await fetchJsonWithTimeout<DriverCareerStats>(`/api/f1/career?driverId=${encodeURIComponent(favoriteDriver.id)}`, {
           signal: controller.signal,
           cache: "no-store",
         });

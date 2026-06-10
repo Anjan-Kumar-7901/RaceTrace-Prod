@@ -2,11 +2,6 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npm run vercel-build",
   "outputDirectory": "dist",
-  "functions": {
-    "api/[...path].ts": {
-      "maxDuration": 30
-    }
-  },
   "routes": [
     {
       "src": "/(.*)",
@@ -18,7 +13,25 @@
       "continue": true
     },
     {
+      "src": "/sw.js",
+      "headers": {
+        "Cache-Control": "public, max-age=0, must-revalidate"
+      },
+      "continue": true
+    },
+    {
+      "src": "/index.html",
+      "headers": {
+        "Cache-Control": "public, max-age=0, must-revalidate"
+      },
+      "continue": true
+    },
+    {
       "handle": "filesystem"
+    },
+    {
+      "src": "/api/(.*)",
+      "status": 404
     },
     {
       "src": "/(.*)",
