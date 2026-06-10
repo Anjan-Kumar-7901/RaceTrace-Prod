@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import app from "../../server";
+import { fallbackRaces } from "../../src/fallbackData";
+import { sendJson } from "../_response";
 
-export default function calendar(req: IncomingMessage, res: ServerResponse) {
-  return app(req, res);
+export default function calendar(_req: IncomingMessage, res: ServerResponse) {
+  sendJson(res, fallbackRaces);
 }

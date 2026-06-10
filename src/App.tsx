@@ -18,6 +18,13 @@ import NewsSection from "./components/NewsSection";
 import LapTimingVisualizer from "./components/LapTimingVisualizer";
 
 import { Driver, Constructor, Race, Article, AppState, DriverCareerStats } from "./types";
+import {
+  fallbackConstructors,
+  fallbackDrivers,
+  fallbackNews,
+  fallbackRaces,
+  getFallbackCareerStats,
+} from "./fallbackData";
 
 const LOCAL_STORAGE_KEY = "racetrace_session_state";
 const THEME_STORAGE_KEY = "racetrace_theme";
@@ -76,10 +83,10 @@ export default function App() {
   const [personalizationStep, setPersonalizationStep] = useState<"name" | "driver">("name");
 
   // Core API Data sets
-  const [drivers, setDrivers] = useState<Driver[]>([]);
-  const [constructors, setConstructors] = useState<Constructor[]>([]);
-  const [races, setRaces] = useState<Race[]>([]);
-  const [news, setNews] = useState<Article[]>([]);
+  const [drivers, setDrivers] = useState<Driver[]>(fallbackDrivers);
+  const [constructors, setConstructors] = useState<Constructor[]>(fallbackConstructors);
+  const [races, setRaces] = useState<Race[]>(fallbackRaces);
+  const [news, setNews] = useState<Article[]>(fallbackNews);
   const [favoriteCareerStats, setFavoriteCareerStats] = useState<DriverCareerStats | null>(null);
   const [careerLoading, setCareerLoading] = useState(false);
 
@@ -122,7 +129,7 @@ export default function App() {
     }
 
     const failures = results.filter((result) => result.status === "rejected");
-    failures.forEach((failure) => console.error("Data synchronization error:", failure.reason));
+    failures.forEach((failure) => console.warn("Live data unavailable; retaining bundled fallback:", failure.reason));
     setErrorSync(failures.length > 0);
     setLoading(false);
   };
@@ -130,17 +137,15 @@ export default function App() {
   // Synchronize on mount and set up regular 10-minute refresh
   useEffect(() => {
     if ("serviceWorker" in navigator) {
-      const isLocalDev = ["localhost", "127.0.0.1"].includes(window.location.hostname);
-      if (isLocalDev) {
-        navigator.serviceWorker
+      // Keep deployments deterministic while the API hosting path is stabilized.
+      navigator.serviceWorker
         .getRegistrations()
-          .then((registrations) => registrations.forEach((registration) => registration.unregister()))
-          .catch((err) => console.warn("Service Worker cleanup failed", err));
-      } else {
-        navigator.serviceWorker
-          .register("/sw.js")
-          .then((reg) => console.log("Service Worker registered on", reg.scope))
-          .catch((err) => console.warn("Service Worker failed", err));
+        .then((registrations) => registrations.forEach((registration) => registration.unregister()))
+        .catch((err) => console.warn("Service Worker cleanup failed", err));
+      if ("caches" in window) {
+        caches.keys()
+          .then((keys) => Promise.all(keys.filter((key) => key.startsWith("racetrace-cache-")).map((key) => caches.delete(key))))
+          .catch((err) => console.warn("RaceTrace cache cleanup failed", err));
       }
     }
 
@@ -239,7 +244,7 @@ export default function App() {
           !Number.isFinite(payload.careerWins) ||
           !Number.isFinite(payload.careerPodiums) ||
           !Number.isFinite(payload.championships) ||
-          payload.source !== "Jolpica F1 API"
+          !payload.source
         ) {
           throw new Error("Career statistics response is incomplete");
         }
@@ -252,6 +257,7 @@ export default function App() {
           return;
         }
         console.error("Favorite driver career statistics error:", error);
+        setFavoriteCareerStats(getFallbackCareerStats(favoriteDriver));
         setCareerLoading(false);
       }
     };

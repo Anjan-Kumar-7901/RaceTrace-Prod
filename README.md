@@ -93,10 +93,8 @@ The timing endpoint currently provides simulated dynamic data. It is not an offi
 - Installable application manifest.
 - Custom RaceTrace application icons and favicon.
 - Standalone installed-app display mode.
-- Service worker for production asset caching and an offline application shell.
-- API requests are excluded from static caching to avoid displaying stale live data.
-
-During local development, previously installed service workers are unregistered to prevent stale development assets.
+- Service-worker registration is temporarily disabled while production API hosting is stabilized.
+- Existing RaceTrace service workers and caches are removed automatically to prevent stale deployments.
 
 ## Data Sources and Reliability
 

@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import app from "../../server";
+import { fallbackNews } from "../../src/fallbackData";
+import { sendJson } from "../_response";
 
-export default function news(req: IncomingMessage, res: ServerResponse) {
-  return app(req, res);
+export default function news(_req: IncomingMessage, res: ServerResponse) {
+  sendJson(res, fallbackNews);
 }
