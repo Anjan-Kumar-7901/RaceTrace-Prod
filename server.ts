@@ -1,8 +1,4 @@
 import express from "express";
-import { GoogleGenAI } from "@google/genai";
-import dotenv from "dotenv";
-
-dotenv.config();
 
 const app = express();
 const JOLPICA_API_BASE_URL = "https://api.jolpi.ca/ergast/f1";
@@ -13,10 +9,20 @@ app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use(express.json({ limit: "100kb" }));
 
-// Initialize Gemini Client safely
-let ai: GoogleGenAI | null = null;
-if (process.env.GEMINI_API_KEY) {
+let ai: any | null = null;
+let aiInitializationAttempted = false;
+
+async function getGeminiClient(): Promise<any | null> {
+  if (aiInitializationAttempted) return ai;
+  aiInitializationAttempted = true;
+
+  if (!process.env.GEMINI_API_KEY) {
+    console.info("GEMINI_API_KEY not configured. News API will serve curated local fallback content.");
+    return null;
+  }
+
   try {
+    const { GoogleGenAI } = await import("@google/genai");
     ai = new GoogleGenAI({
       apiKey: process.env.GEMINI_API_KEY,
       httpOptions: {
@@ -30,8 +36,7 @@ if (process.env.GEMINI_API_KEY) {
   } catch (err) {
     console.error("Failed to initialize Gemini client:", err);
   }
-} else {
-  console.info("GEMINI_API_KEY not configured. News API will serve curated local fallback content.");
+  return ai;
 }
 
 // Memory cache for active endpoints
@@ -316,7 +321,7 @@ app.get("/api/health", (_req, res) => {
     service: "RaceTrace API",
     season: Number(CURRENT_F1_SEASON),
     jolpicaConfigured: true,
-    geminiConfigured: Boolean(ai),
+    geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
     timestamp: new Date().toISOString(),
   });
 });
@@ -794,10 +799,11 @@ app.get("/api/f1/news", async (req, res) => {
     return res.json(cached);
   }
 
-  if (ai && Date.now() > geminiDisabledUntil) {
+  const geminiClient = Date.now() > geminiDisabledUntil ? await getGeminiClient() : null;
+  if (geminiClient) {
     try {
       console.log("Leveraging Gemini Search Grounding for live F1 telemetry news...");
-      const response = await ai.models.generateContent({
+      const response = await geminiClient.models.generateContent({
         model: GEMINI_MODEL,
         contents: `Produce a list of 6 real major Formula 1 news articles from the current ${CURRENT_F1_SEASON} season. Return strictly a JSON array without markdown. Each object must contain id, title, summary, source, publishedAt, and a direct https URL to the source article. Do not invent sources or URLs.`,
         config: {
